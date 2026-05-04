@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>StudyShare – Profile</title>
+  <link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+  <nav id="navbar"></nav>
+  <div class="container page" style="max-width:900px">
+    <div id="profile-content"></div>
+  </div>
+  <div id="toasts" class="toast-container"></div>
+  <script src="js/app.js"></script>
+  <script>
+    let activeTab = 'uploads';
+    document.addEventListener('DOMContentLoaded', () => {
+      renderNav('profile');
+      if (!Auth.isLoggedIn()) { document.getElementById('profile-content').innerHTML = `<div class="empty"><div class="empty-icon">🔒</div><h3>Please login</h3><a href="#" class="btn btn-primary" onclick="openAuthModal('login')">Login</a></div>`; return; }
+      renderProfile();
+    });
+
+    async function renderProfile() {
+      const user = Auth.getUser();
+      document.getElementById('profile-content').innerHTML = `
+        <div style="display:flex;align-items:center;gap:1.5rem;margin-bottom:2.5rem">
+          <img src="${user.avatar}" style="width:72px;height:72px;border-radius:50%;border:3px solid var(--accent)"/>
+          <div>
+            <h1 style="font-family:'Syne',sans-serif;font-size:1.6rem;font-weight:800">${user.name}</h1>
+            <p style="color:var(--text-muted);font-size:0.9rem">${user.email}</p>
+            ${user.role === 'admin' ? '<span class="badge badge-red">Admin</span>' : '<span class="badge badge-accent">Student</span>'}
+          </div>
+        </div>
+        <div class="grid-4" style="margin-bottom:2.5rem" id="profile-stats"></div>
+        <div class="tabs" id="profile-tabs">
+          <button class="tab active" onclick="switchTab('uploads')">📤 My Uploads</button>
+          <button class="tab" onclick="switchTab('saved')">🔖 Saved</button>
+        </div>
+        <div id="tab-content"></div>`;
+      loadProfileStats(); loadTabData('uploads');
+    }
+
+    async function loadProfileStats() {
+      try {
+        const [uploads, saved] = await Promise.all([api('/resources/user/my-uploads'), api('/resources/user/saved')]);
+        const totalDl = uploads.reduce((s, r) => s + r.downloads, 0);
+        const ratings = uploads.filter(r => r.avg_rating > 0);
+        const avgR = ratings.length ? (ratings.reduce((s, r) => s + parseFloat(r.avg_rating), 0) / ratings.length).toFixed(1) : '–';
+        document.getElementById('profile-stats').innerHTML = [
+          { n: uploads.length, l: 'Uploads' }, { n: totalDl, l: 'Total Downloads' },
+          { n: saved.length, l: 'Saved' }, { n: avgR, l: 'Avg Rating' }
+        ].map(s => `<div class="stat-card"><div class="stat-number">${s.n}</div><div class="stat-label">${s.l}</div></div>`).join('');
+      } catch {}
+    }
+
+    function switchTab(tab) {
+      activeTab = tab;
+      document.querySelectorAll('#profile-tabs .tab').forEach((t, i) => t.classList.toggle('active', (tab === 'uploads' && i === 0) || (tab === 'saved' && i === 1)));
+      loadTabData(tab);
+    }
+
+    async function loadTabData(tab) {
+      const el = document.getElementById('tab-content');
+      el.innerHTML = '<div class="page-loader"><div class="loader"></div></div>';
+      try {
+        const resources = await api(tab === 'uploads' ? '/resources/user/my-uploads' : '/resources/user/saved');
+        if (!resources.length) { el.innerHTML = `<div class="empty"><div class="empty-icon">${tab === 'uploads' ? '📤' : '🔖'}</div><h3>${tab === 'uploads' ? 'No uploads yet' : 'Nothing saved yet'}</h3>${tab === 'uploads' ? '<a href="upload.html" class="btn btn-primary" style="margin-top:0.75rem">Upload Now</a>' : ''}</div>`; return; }
+        el.innerHTML = `<div style="margin-top:1.5rem">${resources.map(r => `
+          <div class="card" style="display:flex;align-items:center;gap:1rem;padding:1rem;margin-bottom:0.75rem">
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;font-size:0.92rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.title}</div>
+              <div style="font-size:0.8rem;color:var(--text-muted)">${r.subject} · ⬇️ ${r.downloads} · ★ ${r.avg_rating ? parseFloat(r.avg_rating).toFixed(1) : '–'} · ${timeAgo(r.created_at)}</div>
+            </div>
+            ${tab === 'uploads' ? `<button class="btn btn-danger btn-sm" onclick="deleteRes('${r.id}')">🗑</button>` : ''}
+          </div>`).join('')}</div>`;
+      } catch (e) { el.innerHTML = `<p style="color:var(--accent2)">${e.message}</p>`; }
+    }
+
+    async function deleteRes(id) {
+      if (!confirm('Delete this resource?')) return;
+      try { await api(`/resources/${id}`, { method: 'DELETE' }); toast('Deleted'); loadTabData(activeTab); loadProfileStats(); } catch (e) { toast(e.message, 'error'); }
+    }
+  </script>
+</body>
+</html>

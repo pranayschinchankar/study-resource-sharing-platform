@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>StudyShare – Admin</title>
+  <link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+  <nav id="navbar"></nav>
+  <div class="container page">
+    <div style="margin-bottom:2rem">
+      <h1 class="section-title" style="font-size:2rem">⚙️ Admin Dashboard</h1>
+      <div class="accent-line"></div>
+    </div>
+    <div id="admin-content"></div>
+  </div>
+  <div id="toasts" class="toast-container"></div>
+  <script src="js/app.js"></script>
+  <script>
+    let adminTab = 'resources';
+    document.addEventListener('DOMContentLoaded', () => {
+      renderNav('admin');
+      if (!Auth.isLoggedIn() || !Auth.isAdmin()) { document.getElementById('admin-content').innerHTML = `<div class="empty"><div class="empty-icon">🚫</div><h3>Access Denied</h3><p>Admin only.</p></div>`; return; }
+      loadAdmin();
+    });
+
+    async function loadAdmin() {
+      const el = document.getElementById('admin-content');
+      const stats = await api('/admin/stats').catch(() => null);
+      el.innerHTML = `
+        <div class="grid-4" style="margin-bottom:2rem">
+          ${[
+            { n: stats?.totalResources || 0, l: 'Active Resources', c: 'var(--accent)' },
+            { n: stats?.removedResources || 0, l: 'Removed', c: 'var(--accent2)' },
+            { n: stats?.totalUsers || 0, l: 'Users', c: 'var(--accent3)' },
+            { n: stats?.totalDownloads || 0, l: 'Downloads', c: 'var(--accent)' },
+          ].map(s => `<div class="stat-card"><div class="stat-number" style="color:${s.c}">${s.n}</div><div class="stat-label">${s.l}</div></div>`).join('')}
+        </div>
+        ${stats?.subjectBreakdown && Object.keys(stats.subjectBreakdown).length ? `
+        <div class="card" style="margin-bottom:2rem">
+          <div class="section-title" style="font-size:1rem;margin-bottom:1rem">📊 Resources by Subject</div>
+          ${Object.entries(stats.subjectBreakdown).sort((a,b) => b[1]-a[1]).map(([s,n]) => `
+            <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.6rem">
+              <div style="width:130px;font-size:0.85rem;color:var(--text-muted)">${s}</div>
+              <div style="flex:1"><div class="progress"><div class="progress-fill" style="width:${Math.min(100,Math.round(n/stats.totalResources*100))}%"></div></div></div>
+              <div style="font-size:0.85rem;width:24px;text-align:right">${n}</div>
+            </div>`).join('')}
+        </div>` : ''}
+        <div class="tabs" id="admin-tabs">
+          <button class="tab active" onclick="switchAdminTab('resources')">📁 Active</button>
+          <button class="tab" onclick="switchAdminTab('removed')">🗑 Removed</button>
+          <button class="tab" onclick="switchAdminTab('users')">👥 Users</button>
+        </div>
+        <div id="admin-tab-content"></div>`;
+      loadAdminTab('resources');
+    }
+
+    function switchAdminTab(tab) {
+      adminTab = tab;
+      document.querySelectorAll('#admin-tabs .tab').forEach((t, i) => t.classList.toggle('active', (tab==='resources'&&i===0)||(tab==='removed'&&i===1)||(tab==='users'&&i===2)));
+      loadAdminTab(tab);
+    }
+
+    async function loadAdminTab(tab) {
+      const el = document.getElementById('admin-tab-content');
+      el.innerHTML = '<div class="page-loader"><div class="loader"></div></div>';
+      try {
+        if (tab === 'users') {
+          const users = await api('/admin/users');
+          el.innerHTML = `<div style="margin-top:1.5rem;overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.88rem">
+            <thead><tr style="border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:0.75rem;color:var(--text-muted)">Name</th>
+              <th style="text-align:left;padding:0.75rem;color:var(--text-muted)">Email</th>
+              <th style="text-align:left;padding:0.75rem;color:var(--text-muted)">Role</th>
+              <th style="text-align:left;padding:0.75rem;color:var(--text-muted)">Joined</th>
+              <th style="text-align:left;padding:0.75rem;color:var(--text-muted)">Uploads</th>
+            </tr></thead>
+            <tbody>${users.map(u => `<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:0.75rem"><div style="display:flex;align-items:center;gap:0.5rem"><img src="${u.avatar}" style="width:28px;height:28px;border-radius:50%"/>${u.name}</div></td>
+              <td style="padding:0.75rem;color:var(--text-muted)">${u.email}</td>
+              <td style="padding:0.75rem"><span class="badge ${u.role==='admin'?'badge-red':'badge-accent'}">${u.role}</span></td>
+              <td style="padding:0.75rem;color:var(--text-dim)">${new Date(u.created_at).toLocaleDateString()}</td>
+              <td style="padding:0.75rem">${u.uploads_count || 0}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>`;
+          return;
+        }
+        const all = await api('/admin/resources');
+        const resources = tab === 'removed' ? all.filter(r => r.is_removed) : all.filter(r => !r.is_removed);
+        if (!resources.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">📭</div><h3>Nothing here</h3></div>'; return; }
+        el.innerHTML = `<div style="margin-top:1.5rem">${resources.map(r => `
+          <div class="card" style="display:flex;align-items:center;gap:1rem;padding:1rem;margin-bottom:0.75rem">
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;font-size:0.92rem">${r.title}</div>
+              <div style="font-size:0.8rem;color:var(--text-muted)">${r.subject} · by ${r.uploader_name} · ⬇️ ${r.downloads} · ${timeAgo(r.created_at)}</div>
+            </div>
+            ${r.is_removed
+              ? `<button class="btn btn-secondary btn-sm" onclick="restoreResource('${r.id}')">♻️ Restore</button>`
+              : `<button class="btn btn-danger btn-sm" onclick="removeResource('${r.id}')">🚫 Remove</button>`}
+          </div>`).join('')}</div>`;
+      } catch (e) { el.innerHTML = `<p style="color:var(--accent2)">${e.message}</p>`; }
+    }
+
+    async function removeResource(id) {
+      if (!confirm('Remove this resource?')) return;
+      try { await api(`/admin/resources/${id}/remove`, { method: 'PATCH' }); toast('Removed'); loadAdmin(); } catch (e) { toast(e.message, 'error'); }
+    }
+    async function restoreResource(id) {
+      try { await api(`/admin/resources/${id}/restore`, { method: 'PATCH' }); toast('Restored'); loadAdmin(); } catch (e) { toast(e.message, 'error'); }
+    }
+  </script>
+</body>
+</html>

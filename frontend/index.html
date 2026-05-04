@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>StudyShare – Browse Resources</title>
+  <link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+  <nav id="navbar"></nav>
+
+  <div class="hero">
+    <div class="container">
+      <h1>Find & Share Study Resources</h1>
+      <p>Upload, discover, and download notes, PDFs, and links shared by students.</p>
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input id="search-input" class="search-input" type="text" placeholder="Search by title, subject, tag…" oninput="debounceSearch()"/>
+      </div>
+      <button class="btn btn-primary btn-lg" onclick="requireAuth(() => location.href='upload.html')">+ Upload Resource</button>
+    </div>
+  </div>
+
+  <div class="container page">
+    <div id="stats-row" class="grid-4" style="margin-bottom:2.5rem"></div>
+    <div class="filters" id="subject-filters"></div>
+    <div class="sort-row">
+      <span id="resource-count" style="color:var(--text-muted);font-size:0.88rem"></span>
+      <div style="display:flex;gap:0.5rem;align-items:center">
+        <select id="type-filter" class="sort-select" onchange="loadResources()">
+          <option value="">All Types</option>
+          <option value="file">Files</option>
+          <option value="link">Links</option>
+        </select>
+        <select id="sort-select" class="sort-select" onchange="loadResources()">
+          <option value="newest">Newest</option>
+          <option value="popular">Most Downloaded</option>
+          <option value="rating">Top Rated</option>
+          <option value="oldest">Oldest</option>
+        </select>
+      </div>
+    </div>
+    <div id="resources-grid" class="grid-3"></div>
+  </div>
+
+  <!-- Detail Modal -->
+  <div id="detail-modal" class="hidden modal-overlay">
+    <div class="modal" style="max-width:640px" id="detail-modal-inner"></div>
+  </div>
+
+  <div id="toasts" class="toast-container"></div>
+  <script src="js/app.js"></script>
+  <script>
+    const SUBJECTS = ['All','Mathematics','Physics','Chemistry','Biology','Computer Science','History','Geography','Economics','English','Other'];
+    let currentSubject = 'All', searchTimer;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      renderNav('browse');
+      document.getElementById('subject-filters').innerHTML = SUBJECTS.map(s =>
+        `<button class="filter-btn ${s==='All'?'active':''}" onclick="filterSubject('${s}')">${s}</button>`).join('');
+      loadStats();
+      loadResources();
+    });
+
+    function filterSubject(s) {
+      currentSubject = s;
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.textContent === s));
+      loadResources();
+    }
+
+    function debounceSearch() { clearTimeout(searchTimer); searchTimer = setTimeout(loadResources, 300); }
+
+    async function loadStats() {
+      try {
+        const data = await api('/resources');
+        const dl = data.resources.reduce((s, r) => s + r.downloads, 0);
+        const subjs = new Set(data.resources.map(r => r.subject)).size;
+        document.getElementById('stats-row').innerHTML = [
+          { n: data.total, l: 'Resources' }, { n: dl, l: 'Downloads' },
+          { n: subjs, l: 'Subjects' }, { n: data.resources.filter(r => r.type === 'link').length, l: 'Links' }
+        ].map(s => `<div class="stat-card"><div class="stat-number">${s.n}</div><div class="stat-label">${s.l}</div></div>`).join('');
+      } catch {}
+    }
+
+    async function loadResources() {
+      const grid = document.getElementById('resources-grid');
+      grid.innerHTML = '<div class="page-loader"><div class="loader"></div></div>';
+      const q = document.getElementById('search-input').value;
+      const sort = document.getElementById('sort-select').value;
+      const type = document.getElementById('type-filter').value;
+      let url = `/resources?sort=${sort}`;
+      if (currentSubject !== 'All') url += `&subject=${encodeURIComponent(currentSubject)}`;
+      if (q) url += `&q=${encodeURIComponent(q)}`;
+      if (type) url += `&type=${type}`;
+      try {
+        const data = await api(url);
+        document.getElementById('resource-count').textContent = `${data.total} resource${data.total !== 1 ? 's' : ''}`;
+        if (!data.resources.length) { grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="empty-icon">📭</div><h3>No resources found</h3><p>Try a different search or filter.</p></div>`; return; }
+        grid.innerHTML = data.resources.map(r => resourceCard(r)).join('');
+      } catch (e) { grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="empty-icon">⚠️</div><h3>Failed to load</h3><p>${e.message}</p></div>`; }
+    }
+
+    function resourceCard(r) {
+      const { icon, cls } = fileIcon(r.original_name || r.filename || '', r.type);
+      const tags = Array.isArray(r.tags) ? r.tags : (r.tags ? r.tags.split(',') : []);
+      return `<div class="resource-card" onclick="openDetail('${r.id}')">
+        <div style="display:flex;gap:0.75rem;align-items:flex-start">
+          <div class="resource-card-icon ${cls}">${icon}</div>
+          <div style="flex:1;min-width:0">
+            <div class="resource-title">${r.title}</div>
+            <div style="margin-top:0.25rem"><span class="badge badge-accent">${r.subject}</span></div>
+          </div>
+        </div>
+        ${r.description ? `<div class="resource-desc">${r.description}</div>` : ''}
+        ${tags.length ? `<div style="display:flex;gap:0.35rem;flex-wrap:wrap">${tags.filter(Boolean).map(t => `<span class="badge badge-gray">${t}</span>`).join('')}</div>` : ''}
+        <div class="resource-meta">
+          <span>⬇️ ${r.downloads}</span>
+          <span class="stars">${renderStars(r.avg_rating, r.total_ratings)}</span>
+          <span style="margin-left:auto">${timeAgo(r.created_at)}</span>
+        </div>
+        <div style="font-size:0.78rem;color:var(--text-dim)">by ${r.uploader_name}</div>
+      </div>`;
+    }
+
+    async function openDetail(id) {
+      const overlay = document.getElementById('detail-modal');
+      const inner = document.getElementById('detail-modal-inner');
+      overlay.classList.remove('hidden');
+      inner.innerHTML = '<div class="page-loader"><div class="loader"></div></div>';
+      try {
+        const r = await api(`/resources/${id}`);
+        const { icon, cls } = fileIcon(r.original_name || '', r.type);
+        const user = Auth.getUser();
+        const myRating = r.ratings?.find(rt => rt.user_id === user?.id)?.rating || 0;
+
+        inner.innerHTML = `
+          <div class="modal-header">
+            <div style="display:flex;gap:0.75rem;align-items:center">
+              <div class="resource-card-icon ${cls}" style="width:40px;height:40px">${icon}</div>
+              <div><div class="modal-title" style="font-size:1rem">${r.title}</div><span class="badge badge-accent" style="margin-top:4px">${r.subject}</span></div>
+            </div>
+            <button class="modal-close" onclick="closeDetail()">✕</button>
+          </div>
+          ${r.description ? `<p style="color:var(--text-muted);font-size:0.9rem;margin-bottom:1rem">${r.description}</p>` : ''}
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.75rem;margin-bottom:1.25rem">
+            <div class="stat-card" style="padding:0.75rem"><div style="font-size:1.2rem;font-weight:700;color:var(--accent);text-align:center">${r.downloads}</div><div style="font-size:0.75rem;color:var(--text-muted);text-align:center">Downloads</div></div>
+            <div class="stat-card" style="padding:0.75rem"><div style="font-size:1.2rem;font-weight:700;color:var(--accent);text-align:center">${r.avg_rating ? parseFloat(r.avg_rating).toFixed(1) : '–'}</div><div style="font-size:0.75rem;color:var(--text-muted);text-align:center">Rating</div></div>
+            <div class="stat-card" style="padding:0.75rem"><div style="font-size:1.2rem;font-weight:700;color:var(--accent);text-align:center">${r.comments?.length || 0}</div><div style="font-size:0.75rem;color:var(--text-muted);text-align:center">Comments</div></div>
+          </div>
+          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1.5rem">
+            <button class="btn btn-primary" onclick="downloadResource('${r.id}','${r.url || r.link || ''}')">⬇️ ${r.type === 'link' ? 'Open Link' : 'Download'}</button>
+            ${Auth.isLoggedIn() ? `<button class="btn btn-secondary" id="save-btn" onclick="saveResource('${r.id}',this)">🔖 Save</button>` : ''}
+          </div>
+          ${Auth.isLoggedIn() ? `<div style="margin-bottom:1.5rem"><div class="form-label">Your Rating</div><div id="star-row" style="font-size:1.5rem;cursor:pointer;color:#f5c518">${[1,2,3,4,5].map(n => `<span onclick="rateResource('${r.id}',${n})">${n <= myRating ? '★' : '☆'}</span>`).join('')}</div></div>` : ''}
+          <div style="margin-bottom:1rem">
+            <div class="section-title" style="font-size:1rem;margin-bottom:0.75rem">💬 Comments (${r.comments?.length || 0})</div>
+            <div id="comments-list">${(r.comments || []).map(c => `<div class="comment"><div class="comment-header"><span class="comment-name">${c.user_name}</span><span class="comment-time">${timeAgo(c.created_at)}</span></div><div class="comment-text">${c.text}</div></div>`).join('') || '<p style="color:var(--text-dim);font-size:0.85rem">No comments yet.</p>'}</div>
+            ${Auth.isLoggedIn() ? `<div style="display:flex;gap:0.5rem;margin-top:0.75rem"><input id="comment-input" class="form-control" placeholder="Add a comment…" style="flex:1"/><button class="btn btn-primary btn-sm" onclick="postComment('${r.id}')">Send</button></div>` : `<p style="font-size:0.82rem;color:var(--text-dim);margin-top:0.5rem"><a href="#" onclick="openAuthModal('login')" style="color:var(--accent)">Login</a> to comment.</p>`}
+          </div>
+          <div style="font-size:0.78rem;color:var(--text-dim);border-top:1px solid var(--border);padding-top:0.75rem">Uploaded by <b>${r.uploader_name}</b> · ${timeAgo(r.created_at)}${r.file_size ? ` · ${fmtBytes(r.file_size)}` : ''}</div>`;
+      } catch (e) { inner.innerHTML = `<p style="color:var(--accent2)">${e.message}</p>`; }
+    }
+
+    function closeDetail() { document.getElementById('detail-modal').classList.add('hidden'); loadResources(); loadStats(); }
+    document.getElementById('detail-modal').addEventListener('click', e => { if (e.target.id === 'detail-modal') closeDetail(); });
+
+    async function downloadResource(id, url) {
+      try {
+        const data = await api(`/resources/${id}/download`, { method: 'POST' });
+        if (url.startsWith('/uploads')) { const a = document.createElement('a'); a.href = `${API_BASE}${url}`; a.download = ''; a.target = '_blank'; a.click(); }
+        else window.open(data.url, '_blank');
+        toast('Opening resource…');
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function saveResource(id, btn) {
+      if (!Auth.isLoggedIn()) return openAuthModal('login');
+      try { const data = await api(`/resources/${id}/save`, { method: 'POST' }); btn.textContent = data.saved ? '🔖 Saved' : '🔖 Save'; toast(data.saved ? 'Saved!' : 'Removed from saved'); }
+      catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function rateResource(id, rating) {
+      if (!Auth.isLoggedIn()) return openAuthModal('login');
+      try {
+        await api(`/resources/${id}/rate`, { method: 'POST', body: JSON.stringify({ rating }) });
+        document.getElementById('star-row').innerHTML = [1,2,3,4,5].map(n => `<span onclick="rateResource('${id}',${n})">${n <= rating ? '★' : '☆'}</span>`).join('');
+        toast(`Rated ${rating} ★`);
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function postComment(id) {
+      const input = document.getElementById('comment-input');
+      if (!input.value.trim()) return;
+      try {
+        const c = await api(`/resources/${id}/comment`, { method: 'POST', body: JSON.stringify({ text: input.value }) });
+        const list = document.getElementById('comments-list');
+        if (list.querySelector('p')) list.innerHTML = '';
+        const el = document.createElement('div'); el.className = 'comment';
+        el.innerHTML = `<div class="comment-header"><span class="comment-name">${c.user_name}</span><span class="comment-time">just now</span></div><div class="comment-text">${c.text}</div>`;
+        list.appendChild(el); input.value = ''; toast('Comment posted!');
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    function requireAuth(cb) { if (Auth.isLoggedIn()) cb(); else openAuthModal('login'); }
+  </script>
+</body>
+</html>
