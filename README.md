@@ -7,7 +7,7 @@
 |----------|---------------------|
 | Username | `group`             |
 | Email    | `group@gmail.com`   |
-| Password | `kk`                |
+| Password | `pranay123`                |
 
 ---
 
