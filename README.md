@@ -1,5 +1,16 @@
 # 📚 StudyShare – Study Resource Sharing Platform
 
+🌐 **Live Site:** [https://study-resource-sharing-platform-2.onrender.com](https://study-resource-sharing-platform-2.onrender.com)
+
+🧪 **Test Account:**
+| Field    | Value               |
+|----------|---------------------|
+| Username | `group`             |
+| Email    | `group@gmail.com`   |
+| Password | `kk`                |
+
+---
+
 A full-stack web platform where students can upload, share, browse, and download study materials such as notes, PDFs, and useful links.
 
 ---
